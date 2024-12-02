@@ -1,0 +1,12 @@
+services:
+  mysql:
+    container_name: 'mysql-magalu'
+    restart: unless-stopped
+    image: 'mysql:latest'
+    environment:
+      - 'MYSQL_DATABASE=magaludb'
+      - 'MYSQL_PASSWORD=123'
+      - 'MYSQL_ROOT_PASSWORD=123'
+      - 'MYSQL_USER=admin'
+    ports:
+      - '3307:3306'
