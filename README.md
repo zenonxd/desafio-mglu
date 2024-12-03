@@ -198,46 +198,204 @@ But this is still an ENUM, we need to convert to entity, so we use ``.map(Entiti
 ```java
 ```
 
+If we start the application, we should see on the logs the insertion on the tables.
 
 ### Creating the API to request the notification schedule
 
+We are going to create a Controller class. The ideia is to have a POST method that's going to receive the schedule
+request for the notification.
+
+#### Controller
+
+What do we need to request a notification? We need the date/time, the destination, the message and the channel. So that's
+what our requestDTO will have (the channel has to point to the ENUM values).
+
+Don't worry about the on ResponseEntity, leave it as ``<?>`` for now.
+
+Let's go to our service layer. ➡️
+
+#### Service
+
+It's time to persist the request that came from the controller on the database.
+
+We can't just save the request on the database, we need to convert to an entity. So, inside the DTO we create a method
+that's capable to convert it.
+
+```java
+```
+
+```java
+```
+
+#### Controller (Final)
+
+Now, we just insert out Service and use the method.
+
+We can use a void inside the ResponseEntity and return ``.accept().build()``.
+
 ### Create persistence flux of request
 
+The flux was already created ⬆️.
+
+Our application will receive the notification, it'll be saved on the database and we will return an "accept" (202).
+
 ### Testing the flux (api → service → mysql)
+
+```http request
+POST http://localhost:8080/notifications
+```
+
+```json
+{
+  "dateTime": "YYYY/MM/DDT1HH:MM:SS",
+  "destination": "teste@test.com",
+  "message": "Welcome!",
+  "channel": "EMAIL"
+}
+```
 
 <hr>
 
 ## Consulting the schedule notification situation
 
-### Create notification schedule request query API
+Create an endpoint that's capable of consulting the notification schedule that we created.
 
-### Create request service
+### Create notification schedule request query API (Controller)
+
+We are going to search the notification by the ID.
+
+Create the endpoint (GET).
+
+```java
+```
+
+The return can be the ``Notification`` entity or a NotificationResponse (dto). Also, we can make a if to return ``notFound``,
+on the Controller, or use the service for custom exception.
+
+### Create request service (Service)
+
+If we are going to return ``<Optional>Notification``, just a simple return repository method.
+
+Or we can return the NotificationResponse (dto), converting from entity.
+
+```java
+```
 
 ### Testing the API
+
+```http request
+GET http://localhost:8080/notifications/{id}
+```
 
 <hr>
 
 ## Canceling the notification schedule
 
+This is not a delete method, we are just going to change the status to "CANCELED".
+
 ### Create schedule notification cancellation API
+
+
+```java
+```
 
 ### Create service cancellation
 
+Changing the enum to "CANCELED".
+
+```java
+```
+
 ### Test the API
+
+```http request
+DELETE http://localhost:8080/notifications/{id}
+```
 
 <hr>
 
-## Checking if the notification was sended
+## Checking if the notification was sended (Spring Scheduler)
+
+[Read more about Spring Scheduler](https://spring.io/guides/gs/scheduling-tasks)
+
+Let's remember the whole structure that we are working with to send the notification:
+
+![img.png](img.png)
+
+We already did the register (save, post method), the get (consulting method) and the cancellation! This is our microservice,
+that is interacting with our database.
+
+But let's think about something. **What if we scheduled to 10 minutes from now?** How does our microservice know when
+to send this notification? That's when we are going to use the **Spring Scheduler**!
 
 ### Create checking routine via Spring Scheduler
 
-### Testing the routine
+This routine will work from time to time (like every minute if you want to), checking our database, verifying if there
+is a PENDENT notification.
+
+#### How to use it
+
+Open the main application method, and insert ``@EnableScheduling``.
+
+```java
+@SpringBootApplication
+@EnableScheduling
+public class SchedulingTasksApplication {}
+```
+
+Now, we can create a package named ``scheduler`` with our class ``ExampleTaskScheduler``, this class is a @Component.
+
+Create a method ``checkTasks``. To configure the time that he is going to run (every two minutes, for example), we can use
+``@Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES)`` < this he is going to run every minute.
+
+This expression accepts a lots of values, like ``cron``.
+
+After that, we can create a Logger do SLF4J; ``	private static final Logger log = LoggerFactory.getLogger(ScheduledTasks.class);``
+
+And inside the method, we can inform the time that he is running: ``log.info("The time is now {}", dateFormat.format(new Date()));``
+
+#### Testing the routine
+
+If we run the application, we'll be able to see it in the console.
 
 ### Create Service to consult the available notifications to be sent
 
+The ideia is to check the available notifications to be sent in a certain time. To do that, we have to search
+in the database.
+
+We are going to use a different method using JPA. We want 3 possible outcomes:
+
+1. Notifications with PENDING status;
+2. Notifications with ERROR status;
+3. Notifications with Date before now.
+
+This method needs to reference the attributes in our Entity. For example:
+
+``findByStatusInAndDateTimeBefore``
+
+Status is our attribute inside the Notification entity, same thing for the parameter dateTime! There's a dateTime
+in there as well.
+
+We can use a ``List.of`` the values inside the repository method and after, the dateTime.
+
+After that we'll have the list of notifications (it can be inside a var), and we'll be able to send them (using forEach),
+or something else, changing the STATUS.
+
+**Remember to extract codes into methods.**
+
+```java
+```
+
 ### Create a mock that's able to send the notification with logging
 
-### Create service that updates the nofification status
+Insert the notificationService inside the TaskScheduler, and use the service method inside the Task method.
 
-### Test the complete flux (api -> schedule -> routine -> send the notification - updates the databse)
+
+### Test the complete flux (api -> schedule -> routine -> send the notification - updates the database)
+
+Insert a notification with POST, set the time to one minute ahead.
+
+Use the get method to check the STATUS
+
+Use the get method again after 1 minute.
 
