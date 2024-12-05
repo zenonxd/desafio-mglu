@@ -15,8 +15,27 @@ import lombok.Setter;
 public class Channel {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long channelId;
 
     private String description;
+
+    public enum Values {
+
+        EMAIL(1L, "email"),
+        SMS(2L, "sms"),
+        PUSH(3L, "push"),
+        WHATSAPP(4L, "whatsapp"),;
+
+        private Long id;
+        private String description;
+
+        Values(Long id, String description) {
+            this.id = id;
+            this.description = description;
+        }
+
+        public Channel toChannel() {
+            return new Channel(id, description);
+        }
+    }
 }
