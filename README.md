@@ -146,16 +146,108 @@ And by last, we need to have the register status, if the notification was sent, 
 Needs to have at least 3 attributes: date/time, recipient, message.
 
 ```java
+@Entity
+@Table(name = "tb_notifications")
+@NoArgsConstructor
+@AllArgsConstructor
+@Setter
+@Getter
+public class Notification {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private LocalDateTime date;
+
+    private String receiver;
+
+    private String message;
+
+    @ManyToOne
+    @JoinColumn(name = "channel_id")
+    private Channel channel;
+
+    @ManyToOne
+    @JoinColumn(name = "status_id")
+    private Status status;
+}
 ```
 
 #### Channel
 
 ```java
+@Entity
+@Table(name = "tb_channels")
+@NoArgsConstructor
+@AllArgsConstructor
+@Setter
+@Getter
+public class Channel {
+
+    @Id
+    private Long channelId;
+
+    private String description;
+
+    public enum Values {
+
+        EMAIL(1L, "email"),
+        SMS(2L, "sms"),
+        PUSH(3L, "push"),
+        WHATSAPP(4L, "whatsapp"),;
+
+        private Long id;
+        private String description;
+
+        Values(Long id, String description) {
+            this.id = id;
+            this.description = description;
+        }
+
+        public Channel fromEnum() {
+            return new Channel(id, description);
+        }
+    }
+}
+
 ```
 
 #### Status
 
 ```java
+@Entity
+@Table(name = "tb_status")
+@NoArgsConstructor
+@AllArgsConstructor
+@Getter
+@Setter
+public class Status {
+
+    @Id
+    private Long statusId;
+
+    private String description;
+
+    public enum Values {
+        PENDING(1L, "pending"),
+        SUCCESS(2L, "success"),
+        ERROR(3L, "error"),
+        CANCELED(4L, "canceled");
+
+        private Long id;
+        private String description;
+
+        Values(Long id, String description) {
+            this.id = id;
+            this.description = description;
+        }
+
+        public Status fromStatus() {
+            return new Status(id, description);
+        }
+    }
+}
 ```
 
 ### Creating config to initialize the tables (Channel and Status)
@@ -173,7 +265,43 @@ After that we can pass specific values to the ENUMS(id, description).
 Finally, we can create inside this class a method to convert from ENUM to the class we are working with.
 
 ```java
+@Entity
+@Table(name = "tb_channels")
+@NoArgsConstructor
+@AllArgsConstructor
+@Setter
+@Getter
+public class Channel {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long channelId;
+
+    private String description;
+
+    public enum Values {
+
+        EMAIL(1L, "email"),
+        SMS(2L, "sms"),
+        PUSH(3L, "push"),
+        WHATSAPP(4L, "whatsapp"),;
+
+        private Long id;
+        private String description;
+
+        Values(Long id, String description) {
+            this.id = id;
+            this.description = description;
+        }
+
+        public Channel toChannel() {
+            return new Channel(id, description); 
+        }
+    }
+}
 ```
+
+You can do the same thing on the Status entity. ⬆️
 
 To insert this predefined values, we can create class in the package config, named DataLoader.
 
@@ -190,12 +318,39 @@ predefined.
 
 To do that, we have to insert our repositories (Channel & Status) and use the constructor.
 
-Inside the method we have to persist the values using ``Entitie.Values.values()``. This will return an Array of values,
-that we're going to convert to Stream. ``Arrays.stream(repository::save)``.
+Inside the method we have to persist the values using ``Entitie.Values.values()``. This will return an Array of values.
 
-But this is still an ENUM, we need to convert to entity, so we use ``.map(Entitie.Values::METHOD)``.
+First, we are going to convert to entity from enum, using our method. ``.map(Entitie.Values::METHOD)``.
+
+And now, for each value we save it on the database using ``forEach((repository::save)``
 
 ```java
+@Configuration
+public class DataLoader implements CommandLineRunner {
+
+    private final ChannelRepository channelRepository;
+    private final StatusRepository statusRepository;
+
+    public DataLoader(ChannelRepository channelRepository, StatusRepository statusRepository) {
+        this.channelRepository = channelRepository;
+        this.statusRepository = statusRepository;
+    }
+
+
+    @Override
+    public void run(String... args) throws Exception {
+        //we access all the values of the enum subclass
+        Arrays.stream(Channel.Values.values())
+                //we convert the enum to entity
+                .map(Channel.Values::toChannel)
+                //save everything on database
+                .map(channelRepository::save);
+
+        Arrays.stream(Status.Values.values())
+                .map(Status.Values::toStatus)
+                .forEach(statusRepository::save);
+    }
+}
 ```
 
 If we start the application, we should see on the logs the insertion on the tables.
@@ -210,7 +365,7 @@ request for the notification.
 What do we need to request a notification? We need the date/time, the destination, the message and the channel. So that's
 what our requestDTO will have (the channel has to point to the ENUM values).
 
-Don't worry about the on ResponseEntity, leave it as ``<?>`` for now.
+Don't worry about the ResponseEntity, leave it as ``<?>`` for now.
 
 Let's go to our service layer. ➡️
 
@@ -222,22 +377,74 @@ We can't just save the request on the database, we need to convert to an entity.
 that's capable to convert it.
 
 ```java
+public record NotificationScheduleRequest(LocalDateTime data,
+                                          String receiver,
+                                          String message,
+                                          Channel.Values channel) {
+
+    public Notification toNotification() {
+        return new Notification(
+                data,
+                receiver,
+                message,
+                channel.toChannel(),
+                Status.Values.PENDING.toStatus()
+        );
+    }
+}
 ```
 
 ```java
+@Service
+public class NotificationService {
+
+    private final NotificationRepository notificationRepository;
+
+    public NotificationService(NotificationRepository notificationRepository) {
+        this.notificationRepository = notificationRepository;
+    }
+
+
+    public void scheduleNotification(NotificationScheduleRequest dto) {
+        //using the method of the record
+        notificationRepository.save(dto.toNotification());
+    }
+}
 ```
 
 #### Controller (Final)
 
-Now, we just insert out Service and use the method.
+Now, we just insert our Service and use the method.
 
 We can use a void inside the ResponseEntity and return ``.accept().build()``.
+
+```java
+@RestController
+@RequestMapping(value = "/notification")
+public class NotificationController {
+
+    private final NotificationService notificationService;
+
+    public NotificationController(NotificationService notificationService) {
+        this.notificationService = notificationService;
+    }
+
+
+    @PostMapping(value = "/schedule")
+    public ResponseEntity<Void> scheduleNotification(@RequestBody NotificationScheduleRequest dto) {
+
+        notificationService.scheduleNotification(dto);
+
+        return ResponseEntity.accepted().build();
+    }
+}
+```
 
 ### Create persistence flux of request
 
 The flux was already created ⬆️.
 
-Our application will receive the notification, it'll be saved on the database and we will return an "accept" (202).
+Our application will receive the notification, it'll be saved on the database, and we will return an "accept" (202).
 
 ### Testing the flux (api → service → mysql)
 
@@ -247,7 +454,7 @@ POST http://localhost:8080/notifications
 
 ```json
 {
-  "dateTime": "YYYY/MM/DDT1HH:MM:SS",
+  "date": "YYYY/MM/DDT1HH:MM:SS",
   "destination": "teste@test.com",
   "message": "Welcome!",
   "channel": "EMAIL"
@@ -267,9 +474,17 @@ We are going to search the notification by the ID.
 Create the endpoint (GET).
 
 ```java
+    @GetMapping(value = "/{id}")
+    public ResponseEntity<NotificationResponse> findNotificationById(@PathVariable Long id) {
+
+        var response = notificationService.findNotificationById(id);
+
+        return ResponseEntity.ok(response);
+
+    }
 ```
 
-The return can be the ``Notification`` entity or a NotificationResponse (dto). Also, we can make a if to return ``notFound``,
+The return can be the ``Notification`` entity or a NotificationResponse (dto). Also, we can make an if to return ``notFound``,
 on the Controller, or use the service for custom exception.
 
 ### Create request service (Service)
@@ -279,6 +494,35 @@ If we are going to return ``<Optional>Notification``, just a simple return repos
 Or we can return the NotificationResponse (dto), converting from entity.
 
 ```java
+    public NotificationResponse findNotificationById(Long id) {
+        Notification notification = notificationRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Notification not found"));
+
+        return NotificationResponse.from(notification);
+    }
+```
+
+### DTO + Converting from entity
+
+```java
+public record NotificationResponse(Long id,
+                                   LocalDateTime date,
+                                   String receiver,
+                                   String message,
+                                   Channel channel,
+                                   Status status) {
+
+    public static NotificationResponse from(Notification notification) {
+        return new NotificationResponse(
+                notification.getId(),
+                notification.getDate(),
+                notification.getReceiver(),
+                notification.getMessage(),
+                notification.getChannel(),
+                notification.getStatus()
+        );
+    }
+}
 ```
 
 ### Testing the API
@@ -286,6 +530,8 @@ Or we can return the NotificationResponse (dto), converting from entity.
 ```http request
 GET http://localhost:8080/notifications/{id}
 ```
+
+![img_1.png](img_1.png)
 
 <hr>
 
@@ -295,8 +541,14 @@ This is not a delete method, we are just going to change the status to "CANCELED
 
 ### Create schedule notification cancellation API
 
-
 ```java
+    @DeleteMapping(value = "/{id}")
+    public ResponseEntity<Void> updateNotificationById(@PathVariable Long id) {
+
+        notificationService.updateNotificationById(id);
+
+        return ResponseEntity.noContent().build();
+    }
 ```
 
 ### Create service cancellation
@@ -304,6 +556,14 @@ This is not a delete method, we are just going to change the status to "CANCELED
 Changing the enum to "CANCELED".
 
 ```java
+    public void updateNotificationById(Long id) {
+        var notification = notificationRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Notification not found"));
+
+        notification.setStatus(Status.Values.CANCELED.toStatus());
+
+        notificationRepository.save(notification);
+    }
 ```
 
 ### Test the API
@@ -314,7 +574,7 @@ DELETE http://localhost:8080/notifications/{id}
 
 <hr>
 
-## Checking if the notification was sended (Spring Scheduler)
+## Checking if the notification was sent (Spring Scheduler)
 
 [Read more about Spring Scheduler](https://spring.io/guides/gs/scheduling-tasks)
 
